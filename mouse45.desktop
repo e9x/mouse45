@@ -1,0 +1,10 @@
+[Desktop Entry]
+Comment=
+Exec=xfce4-terminal -T mouse45 -e "bash -c 'MOUSE45_BIN_PATH; echo; read -p \"Press Enter to exit...\"'"
+Icon=input-mouse
+Name=mouse45
+NoDisplay=false
+Path=
+StartupNotify=true
+Terminal=false
+Type=Application
