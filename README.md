@@ -109,8 +109,10 @@ sudo systemctl enable --now input-remapper
 
 1. Run `input-remapper-gtk`
 2. Select your mouse
-3. Map your lower side button to the keyboard key <kbd>[</kbd>
-4. Map your upper side button to the keyboard key <kbd>]</kbd>
+3. Map your lower side button to <kbd>Alt</kbd>+<kbd>]</kbd>: `ALT_L + bracketleft`
+4. Map your upper side button to <kbd>Alt</kbd>+<kbd>]</kbd>: `ALT_L + bracketright`
+
+When the script is ran, the macro for the bracket keys will be triggered by the side buttons and will scroll. 
 
 ## Running
 
@@ -122,12 +124,12 @@ Start the program:
 
 ## Controls / Usage
 
-- <kbd>[</kbd> : Scroll Down | <kbd>Ctrl</kbd>+<kbd>[</kbd> : Back
-- <kbd>]</kbd> : Scroll Up | <kbd>Ctrl</kbd>+<kbd>]</kbd> : Forward
+- <kbd>Alt</kbd>+<kbd>[</kbd> : Scroll Down | <kbd>Ctrl</kbd>+<kbd>[</kbd> : Back
+- <kbd>Alt</kbd>+<kbd>]</kbd> : Scroll Up | <kbd>Ctrl</kbd>+<kbd>]</kbd> : Forward
 - <kbd>`</kbd> : Bhop Hold (Toggle with <kbd>b</kbd>)
 - <kbd>s</kbd> : Toggle Mouse/Brackets On/Off
 
-_Focus this window and press <kbd>q</kbd> to quit._
+_Focus the window and press <kbd>q</kbd> to quit._
 
 ## Example Remapper Config
 
@@ -135,29 +137,30 @@ My `input-remapper` JSON config for a Logitech G203 (from `~/.config/input-remap
 
 ```json
 [
-  {
-    "input_combination": [
-      {
-        "type": 1,
-        "code": 276,
-        "origin_hash": "32844196a41f9bfae3ab69ea16314300"
-      }
-    ],
-    "target_uinput": "keyboard",
-    "output_symbol": "bracketright",
-    "mapping_type": "key_macro"
-  },
-  {
-    "input_combination": [
-      {
-        "type": 1,
-        "code": 275,
-        "origin_hash": "32844196a41f9bfae3ab69ea16314300"
-      }
-    ],
-    "target_uinput": "keyboard",
-    "output_symbol": "bracketleft",
-    "mapping_type": "key_macro"
-  }
+    {
+        "input_combination": [
+            {
+                "type": 1,
+                "code": 276,
+                "origin_hash": "32844196a41f9bfae3ab69ea16314300"
+            }
+        ],
+        "target_uinput": "keyboard",
+        "output_symbol": "ALT_L + bracketright",
+        "mapping_type": "key_macro"
+    },
+    {
+        "input_combination": [
+            {
+                "type": 1,
+                "code": 275,
+                "origin_hash": "32844196a41f9bfae3ab69ea16314300"
+            }
+        ],
+        "target_uinput": "keyboard",
+        "output_symbol": "\tALT_L + bracketleft",
+        "mapping_type": "key_macro"
+    }
 ]
+
 ```

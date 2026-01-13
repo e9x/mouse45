@@ -55,14 +55,29 @@ xcb_connection_t *conn;
 xcb_window_t root;
 
 bool grab_key(xcb_keycode_t key) {
-  xcb_void_cookie_t cookie =
-      xcb_grab_key_checked(conn, 1, root, XCB_MOD_MASK_ANY, key,
-                           XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+  // check for macro
+  uint16_t modifiers[] = {
+      XCB_MOD_MASK_1,                        // alt
+      XCB_MOD_MASK_1 | XCB_MOD_MASK_CONTROL, // alt+ctrl
+      XCB_MOD_MASK_1 | XCB_MOD_MASK_LOCK,    // alt+caps
+      XCB_MOD_MASK_1 | XCB_MOD_MASK_CONTROL |
+          XCB_MOD_MASK_LOCK,                                  // ctrl+alt+caps
+      XCB_MOD_MASK_1 | XCB_MOD_MASK_2,                        // alt+numlock
+      XCB_MOD_MASK_1 | XCB_MOD_MASK_CONTROL | XCB_MOD_MASK_2, // ctrl+alt+numpad
+      XCB_MOD_MASK_1 | XCB_MOD_MASK_LOCK | XCB_MOD_MASK_2,    // ctrl+alt+numpad
+      XCB_MOD_MASK_1 | XCB_MOD_MASK_CONTROL | XCB_MOD_MASK_LOCK |
+          XCB_MOD_MASK_2};
 
-  xcb_generic_error_t *error = xcb_request_check(conn, cookie);
-  if (error) {
-    free(error);
-    return false;
+  for (int i = 0; i < sizeof(modifiers) / sizeof(modifiers[0]); i++) {
+    xcb_void_cookie_t cookie =
+        xcb_grab_key_checked(conn, 1, root, modifiers[i], key,
+                             XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+
+    xcb_generic_error_t *error = xcb_request_check(conn, cookie);
+    if (error) {
+      free(error);
+      return false;
+    }
   }
   return true;
 }
