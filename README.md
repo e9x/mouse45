@@ -112,7 +112,7 @@ sudo systemctl enable --now input-remapper
 3. Map your lower side button to <kbd>Alt</kbd>+<kbd>]</kbd>: `ALT_L + bracketleft`
 4. Map your upper side button to <kbd>Alt</kbd>+<kbd>]</kbd>: `ALT_L + bracketright`
 
-When the script is ran, the macro for the bracket keys will be triggered by the side buttons and will scroll. 
+When the script is ran, the macro for the bracket keys will be triggered by the side buttons and will scroll.
 
 ## Running
 
@@ -137,30 +137,33 @@ My `input-remapper` JSON config for a Logitech G203 (from `~/.config/input-remap
 
 ```json
 [
-    {
-        "input_combination": [
-            {
-                "type": 1,
-                "code": 276,
-                "origin_hash": "32844196a41f9bfae3ab69ea16314300"
-            }
-        ],
-        "target_uinput": "keyboard",
-        "output_symbol": "ALT_L + bracketright",
-        "mapping_type": "key_macro"
-    },
-    {
-        "input_combination": [
-            {
-                "type": 1,
-                "code": 275,
-                "origin_hash": "32844196a41f9bfae3ab69ea16314300"
-            }
-        ],
-        "target_uinput": "keyboard",
-        "output_symbol": "\tALT_L + bracketleft",
-        "mapping_type": "key_macro"
-    }
+  {
+    "input_combination": [
+      {
+        "type": 1,
+        "code": 276,
+        "origin_hash": "32844196a41f9bfae3ab69ea16314300"
+      }
+    ],
+    "target_uinput": "keyboard",
+    "output_symbol": "ALT_L + bracketright",
+    "mapping_type": "key_macro"
+  },
+  {
+    "input_combination": [
+      {
+        "type": 1,
+        "code": 275,
+        "origin_hash": "32844196a41f9bfae3ab69ea16314300"
+      }
+    ],
+    "target_uinput": "keyboard",
+    "output_symbol": "\tALT_L + bracketleft",
+    "mapping_type": "key_macro"
+  }
 ]
-
 ```
+
+# Help
+
+Feel free to open an issue: https://github.com/e9x/mouse45/issues
