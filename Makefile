@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -O2
-LIBS = -lxcb -lxcb-xtest -lpthread
+LIBS = -lpthread
 
 SRC_DIR = src
 BIN_DIR = bin
