@@ -9,19 +9,21 @@ Before building, install X11 libraries:
 Debian/Ubuntu:
 
 ```sh
-sudo apt install build-essential libx11-dev libxtst-dev
+sudo apt update
+sudo apt install build-essential
 ```
 
 Fedora:
 
 ```sh
-sudo dnf install gcc make libX11-devel libXtst-devel
+sudo dnf groupinstall "Development Tools"
+sudo dnf install kernel-headers
 ```
 
 Arch:
 
 ```sh
-sudo pacman -S base-devel libx11 libxtst
+sudo pacman -Syu base-devel
 ```
 
 ## Building
@@ -53,116 +55,73 @@ Arch:
 sudo pacman -S xfce4-terminal
 ```
 
-## Setup & Configuration
-
-### 1. X11 Configuration
-
-You must enable mouse wheel emulation in X11 for this to work.
-
-Create `/etc/X11/xorg.conf.d/99-mouse-emulation.conf` and add:
-
-```
-Section "InputClass"
-    Identifier "evdev pointer catchall"
-    MatchIsPointer "on"
-    MatchDevicePath "/dev/input/event*"
-    Driver "evdev"
-    Option "EmulateWheel"	"true"
-    Option "EmulateWheelButton"    "2"
-    Option "XAxisMapping"	"6 7"
-    Option "YAxisMapping"	"4 5"
-EndSection
-```
-
-### 2. Button Remapping
-
-Install [input-remapper](https://github.com/sezanzeb/input-remapper):
-
-Debian/Ubuntu:
+## Building
 
 ```sh
-wget https://github.com/sezanzeb/input-remapper/releases/download/2.2.0/input-remapper-2.2.0.deb
-sudo apt install -f ./input-remapper-2.2.0.deb
+git clone https://github.com/e9x/mouse45
+cd mouse45
+make
 ```
 
-Or:
+Optionally install the shortcuts:
 
 ```sh
-sudo apt install input-remapper
+make install
 ```
 
-Fedora:
+## Permissions
+
+You may find that running mouse45 gives errors relating to sudo and not being able to access a device with uinput. You can configure uinput roles like this:
 
 ```sh
-sudo dnf install input-remapper
-sudo systemctl enable --now input-remapper
+echo 'KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/99-uinput.rules
 ```
 
-Arch:
+Make yourself a user too
 
 ```sh
-yay -S input-remapper-git
-sudo systemctl enable --now input-remapper
+sudo usermod -aG input $USER
 ```
 
-### Configure
-
-1. Run `input-remapper-gtk`
-2. Select your mouse
-3. Map your lower side button to <kbd>Alt</kbd>+<kbd>]</kbd>: `ALT_L + bracketleft`
-4. Map your upper side button to <kbd>Alt</kbd>+<kbd>]</kbd>: `ALT_L + bracketright`
-
-When the script is ran, the macro for the bracket keys will be triggered by the side buttons and will scroll.
+If the above is too much then
 
 ## Running
 
-Start the program:
+Start the program (requires root):
 
 ```sh
-./mouse45
+./bin/mouse45
 ```
 
-## Controls / Usage
+## Controls & Keybinds
 
-- <kbd>Alt</kbd>+<kbd>[</kbd> : Scroll Down | <kbd>Ctrl</kbd>+<kbd>[</kbd> : Back
-- <kbd>Alt</kbd>+<kbd>]</kbd> : Scroll Up | <kbd>Ctrl</kbd>+<kbd>]</kbd> : Forward
-- <kbd>`</kbd> : Bhop Hold (Toggle with <kbd>b</kbd>)
-- <kbd>s</kbd> : Toggle Mouse/Brackets On/Off
+Once the program is running and the devices are selected, the following keybinds are active:
 
-_Focus the window and press <kbd>q</kbd> to quit._
+### Mouse Features
 
-## Example Remapper Config
+| Trigger                             | Action             | Description                             |
+| :---------------------------------- | :----------------- | :-------------------------------------- |
+| **Mouse Forward Button**            | **Scroll Up**      | Simulates mouse wheel scrolling up.     |
+| **Mouse Back Button**               | **Scroll Down**    | Simulates mouse wheel scrolling down.   |
+| <kbd>Ctrl</kbd> + Mouse Forward\*\* | **Native Forward** | Stops simulating mouse wheel while held |
+| **Ctrl/kbd> + Mouse Back**          | **Native Back**    | Sends the back button event normally    |
 
-My `input-remapper` JSON config for a Logitech G203 (from `~/.config/input-remapper-2/presets/Logitech\ G203\ LIGHTSYNC\ Gaming\ Mouse/scroll\ it.json`)
+### Keyboard Features
 
-```json
-[
-  {
-    "input_combination": [
-      {
-        "type": 1,
-        "code": 276,
-        "origin_hash": "32844196a41f9bfae3ab69ea16314300"
-      }
-    ],
-    "target_uinput": "keyboard",
-    "output_symbol": "ALT_L + bracketright",
-    "mapping_type": "key_macro"
-  },
-  {
-    "input_combination": [
-      {
-        "type": 1,
-        "code": 275,
-        "origin_hash": "32844196a41f9bfae3ab69ea16314300"
-      }
-    ],
-    "target_uinput": "keyboard",
-    "output_symbol": "\tALT_L + bracketleft",
-    "mapping_type": "key_macro"
-  }
-]
-```
+| Trigger                         | Action        | Description                                     |
+| :------------------------------ | :------------ | :---------------------------------------------- |
+| Hold <kbd>`</kbd> (grave/tilde) | **Bunny Hop** | Spams the **Spacebar** while held (for gaming). |
+
+### Terminal Management
+
+When the terminal window running `mouse45` is in focus:
+
+| Key          | Function             | Description                                                |
+| :----------- | :------------------- | :--------------------------------------------------------- |
+| <kbd>s</kbd> | **Toggle Scrolling** | Enables/Disables the side-button scrolling feature.        |
+| <kbd>b</kbd> | **Toggle Bhop**      | Enables/Disables the bunny hop macro <kbd>`</kbd> feature. |
+| <kbd>z</kbd> | **Reselect Devices** | Prompts you to pick devices again.                         |
+| <kbd>q</kbd> | **Quit**             | Exit                                                       |
 
 # Help
 
