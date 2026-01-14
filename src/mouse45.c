@@ -405,7 +405,7 @@ void cleanup(int signo) {
   }
 
   cleanup_ncurses();
-  printf("Exited cleanly.\n");
+  printf("byeee\n");
   exit(0);
 }
 
