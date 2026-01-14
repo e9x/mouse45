@@ -1,6 +1,6 @@
-CC = gcc
+	CC = gcc
 CFLAGS = -Wall -O2
-LIBS = -lpthread
+LIBS = -lpthread -lncurses
 
 SRC_DIR = src
 BIN_DIR = bin

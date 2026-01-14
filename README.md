@@ -1,10 +1,10 @@
 # mouse45
 
-A scrolling utility for Linux/X11 that simulates scrolling and has bhopping.
+A scrolling utility for Linux/Wayland/X11 that simulates scrolling and has bhopping.
 
 ## Prerequisites
 
-Before building, install X11 libraries:
+Before building, make sure you have all the required libaries for building C code (gcc)
 
 Debian/Ubuntu:
 

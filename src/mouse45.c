@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/uinput.h>
+#include <ncurses.h>
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
@@ -13,7 +14,6 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <termios.h>
 #include <unistd.h>
 #include <wordexp.h>
 
@@ -26,12 +26,11 @@
 #define CONFIG_KBD CONFIG_DIR "/keyboard.txt"
 #define CONFIG_STATUS CONFIG_DIR "/status.txt"
 
-#define ANSI_RESET "\033[0m"
-#define ANSI_GREEN "\033[32m"
-#define ANSI_RED "\033[31m"
-#define ANSI_CLEAR_SCREEN "\033[2J\033[H"
-#define ANSI_SHOW_CURSOR "\033[?25h"
-#define ANSI_HIDE_CURSOR "\033[?25l"
+#define CP_NORMAL 1
+#define CP_GREEN 2
+#define CP_RED 3
+#define CP_HEADER 4
+#define CP_HIGHLIGHT 5
 
 int mouse_fd = -1;
 int kbd_fd = -1;
@@ -47,7 +46,22 @@ atomic_bool action_scroll_up = false;
 atomic_bool action_scroll_down = false;
 atomic_bool action_bhop = false;
 
-struct termios orig_termios;
+void cleanup_ncurses() { endwin(); }
+
+void init_ncurses_ui() {
+  initscr();
+  cbreak();
+  noecho();
+  keypad(stdscr, TRUE);
+  curs_set(0);
+  start_color();
+  use_default_colors();
+  init_pair(CP_NORMAL, -1, -1);
+  init_pair(CP_GREEN, COLOR_GREEN, -1);
+  init_pair(CP_RED, COLOR_RED, -1);
+  init_pair(CP_HEADER, COLOR_CYAN, -1);
+  init_pair(CP_HIGHLIGHT, COLOR_BLACK, COLOR_WHITE);
+}
 
 void get_expanded_path(const char *raw_path, char *buffer) {
   if (strncmp(raw_path, "~/", 2) == 0) {
@@ -149,22 +163,6 @@ int ends_with(const char *str, const char *suffix) {
   return strncmp(str + len_str - len_suffix, suffix, len_suffix) == 0;
 }
 
-void reset_terminal_mode() {
-  printf(ANSI_SHOW_CURSOR);
-  tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
-}
-
-void set_raw_terminal_mode() {
-  struct termios new_termios;
-  tcgetattr(STDIN_FILENO, &orig_termios);
-  memcpy(&new_termios, &orig_termios, sizeof(new_termios));
-  new_termios.c_lflag &= ~(ICANON | ECHO);
-  new_termios.c_cc[VMIN] = 1;
-  new_termios.c_cc[VTIME] = 0;
-  tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
-  printf(ANSI_HIDE_CURSOR);
-}
-
 void emit(int fd, uint16_t type, uint16_t code, int32_t value) {
   struct input_event ie;
   memset(&ie, 0, sizeof(ie));
@@ -190,31 +188,51 @@ void release_all_keys(int fd) {
   pthread_mutex_unlock(&uinput_lock);
 }
 
-void print_ui() {
-  printf(ANSI_CLEAR_SCREEN);
-  printf("\rmouse45 running\n");
-  printf("---------------------------------------------------------\n");
+void draw_main_ui() {
+  erase();
+  attron(COLOR_PAIR(CP_NORMAL));
 
-  printf(" [s] Scrolling  : ");
-  if (toggle_scroll)
-    printf(ANSI_GREEN "ON " ANSI_RESET);
-  else
-    printf(ANSI_RED "OFF" ANSI_RESET);
-  printf(" (Side buttons)\n");
+  attron(COLOR_PAIR(CP_HEADER));
+  mvprintw(0, 0, " mouse45 running ");
+  attroff(COLOR_PAIR(CP_HEADER));
 
-  printf(" [b] Bhop       : ");
-  if (toggle_bhop)
-    printf(ANSI_GREEN "ON " ANSI_RESET);
-  else
-    printf(ANSI_RED "OFF" ANSI_RESET);
-  printf(" (Hold `)\n");
+  attron(COLOR_PAIR(CP_NORMAL));
+  mvprintw(1, 0, "---------------------------------------------------------");
 
-  printf("---------------------------------------------------------\n");
-  printf(" BackBtn        : Scroll Down | Ctrl + BackBtn : Back\n");
-  printf(" FwdBtn         : Scroll Up   | Ctrl + FwdBtn  : Forward\n");
-  printf("---------------------------------------------------------\n");
-  printf(" [z] Reselect Devices | [q] Quit\n");
-  fflush(stdout);
+  mvprintw(3, 1, "[s] Scrolling  : ");
+  if (toggle_scroll) {
+    attron(COLOR_PAIR(CP_GREEN));
+    printw("ON ");
+    attroff(COLOR_PAIR(CP_GREEN));
+  } else {
+    attron(COLOR_PAIR(CP_RED));
+    printw("OFF");
+    attroff(COLOR_PAIR(CP_RED));
+  }
+  attron(COLOR_PAIR(CP_NORMAL));
+  printw(" (Side buttons)");
+
+  mvprintw(4, 1, "[b] Bhop       : ");
+  if (toggle_bhop) {
+    attron(COLOR_PAIR(CP_GREEN));
+    printw("ON ");
+    attroff(COLOR_PAIR(CP_GREEN));
+  } else {
+    attron(COLOR_PAIR(CP_RED));
+    printw("OFF");
+    attroff(COLOR_PAIR(CP_RED));
+  }
+  attron(COLOR_PAIR(CP_NORMAL));
+  printw(" (Hold `)");
+
+  mvprintw(6, 0, "---------------------------------------------------------");
+  mvprintw(7, 1, "BackBtn        : Scroll Down | Ctrl + BackBtn : Back");
+  mvprintw(8, 1, "FwdBtn         : Scroll Up   | Ctrl + FwdBtn  : Forward");
+  mvprintw(9, 0, "---------------------------------------------------------");
+  mvprintw(11, 1, "[z] Reselect Devices | [q] Quit");
+
+  attroff(COLOR_PAIR(CP_NORMAL));
+  refresh();
 }
 
 int select_device(char *selected_path, size_t len, const char *error_msg,
@@ -226,8 +244,9 @@ int select_device(char *selected_path, size_t len, const char *error_msg,
   const char *dev_dir = "/dev/input/by-id/";
 
   DIR *dp = opendir(dev_dir);
-  if (!dp)
+  if (!dp) {
     return -1;
+  }
 
   while ((entry = readdir(dp))) {
     if (ends_with(entry->d_name, filter)) {
@@ -240,67 +259,87 @@ int select_device(char *selected_path, size_t len, const char *error_msg,
   closedir(dp);
 
   if (count == 0) {
-    fprintf(stderr, "No devices ending in '%s' found.\n", filter);
-    sleep(2);
     return -1;
   }
 
-  reset_terminal_mode();
-  printf(ANSI_CLEAR_SCREEN);
+  int highlight = 0;
+  int ch = 0;
+  bool selected = false;
 
-  if (error_msg && *error_msg) {
-    printf(ANSI_RED "Error: %s" ANSI_RESET "\n\n", error_msg);
-  }
+  while (!selected && atomic_load(&keep_running)) {
+    erase();
+    attron(COLOR_PAIR(CP_NORMAL));
 
-  printf("Select %s:\n", title);
-  printf("----------------------------------\n");
-  for (int i = 0; i < count; i++) {
-    char *marker = "";
-    if (current_pref && strstr(current_pref, dev_names[i])) {
-      marker = " [Current]";
+    if (error_msg && *error_msg) {
+      attron(COLOR_PAIR(CP_RED));
+      mvprintw(0, 0, "Error: %s", error_msg);
+      attroff(COLOR_PAIR(CP_RED));
     }
-    printf("%d) %s%s\n", i + 1, dev_names[i], marker);
-  }
-  printf("----------------------------------\n");
 
-  int choice = -1;
-  char buffer[64];
+    attron(COLOR_PAIR(CP_HEADER));
+    mvprintw(2, 0, " Select %s (Arrow Keys / Enter) ", title);
+    attroff(COLOR_PAIR(CP_HEADER));
 
-  while (choice == -1) {
-    printf("Choice (1-%d) or 'q' to go back: ", count);
-    if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
-      // eof or err
+    attron(COLOR_PAIR(CP_NORMAL));
+    mvprintw(3, 0, " 'q' to go back/quit ");
+
+    for (int i = 0; i < count; i++) {
+      int y = 5 + i;
+      if (i == highlight) {
+        attron(COLOR_PAIR(CP_HIGHLIGHT));
+      } else {
+        attron(COLOR_PAIR(CP_NORMAL));
+      }
+
+      char marker[16] = "";
+      if (current_pref && strstr(current_pref, dev_names[i])) {
+        strcpy(marker, "[Current]");
+      }
+
+      mvprintw(y, 2, "%d) %s %s", i + 1, dev_names[i], marker);
+
+      if (i == highlight) {
+        attroff(COLOR_PAIR(CP_HIGHLIGHT));
+      }
+    }
+
+    attroff(COLOR_PAIR(CP_NORMAL));
+    refresh();
+
+    ch = getch();
+    switch (ch) {
+    case KEY_UP:
+      if (highlight > 0)
+        highlight--;
+      else
+        highlight = count - 1;
       break;
-    }
-
-    buffer[strcspn(buffer, "\n")] = 0;
-
-    if (strcmp(buffer, "q") == 0 || strcmp(buffer, "Q") == 0) {
+    case KEY_DOWN:
+      if (highlight < count - 1)
+        highlight++;
+      else
+        highlight = 0;
+      break;
+    case 10: // enter
+      selected = true;
+      break;
+    case 'q':
+    case 'Q':
       for (int i = 0; i < count; i++)
         free(dev_names[i]);
       return -1;
     }
-
-    char *endptr;
-    long val = strtol(buffer, &endptr, 10);
-
-    if (endptr == buffer || val < 1 || val > count) {
-      printf("Invalid selection. Please enter a number between 1 and %d.\n",
-             count);
-    } else {
-      choice = (int)val;
-    }
   }
 
-  if (choice != -1) {
-    snprintf(selected_path, len, "%s%s", dev_dir, dev_names[choice - 1]);
+  if (selected) {
+    snprintf(selected_path, len, "%s%s", dev_dir, dev_names[highlight]);
   }
 
   for (int i = 0; i < count; i++) {
     free(dev_names[i]);
   }
 
-  return (choice != -1) ? 0 : -1;
+  return selected ? 0 : -1;
 }
 
 void *output_thread(void *arg) {
@@ -348,7 +387,6 @@ void *output_thread(void *arg) {
 }
 
 void cleanup(int signo) {
-  reset_terminal_mode();
   atomic_store(&keep_running, false);
 
   if (virt_fd >= 0) {
@@ -366,14 +404,14 @@ void cleanup(int signo) {
     close(kbd_fd);
   }
 
-  printf("\nExited cleanly.\n");
+  cleanup_ncurses();
+  printf("Exited cleanly.\n");
   exit(0);
 }
 
 int main(void) {
-  tcgetattr(STDIN_FILENO, &orig_termios);
+  init_ncurses_ui();
 
-  printf(ANSI_CLEAR_SCREEN);
   signal(SIGINT, cleanup);
   signal(SIGTERM, cleanup);
   load_status();
@@ -381,6 +419,7 @@ int main(void) {
 
   virt_fd = open("/dev/uinput", O_WRONLY);
   if (virt_fd < 0) {
+    cleanup_ncurses();
     perror("Failed to open /dev/uinput");
     return 1;
   }
@@ -441,6 +480,8 @@ int main(void) {
 
     reselect = false;
 
+    draw_main_ui();
+
     mouse_fd = open(m_path, O_RDONLY);
     if (mouse_fd < 0) {
       snprintf(error, sizeof(error), "Mouse Open Fail: %s", strerror(errno));
@@ -448,6 +489,9 @@ int main(void) {
       sleep(1);
       continue;
     }
+
+    sleep(1);
+
     if (ioctl(mouse_fd, EVIOCGRAB, 1) < 0) {
       snprintf(error, sizeof(error), "Mouse Grab Fail (sudo?)");
       close(mouse_fd);
@@ -465,10 +509,6 @@ int main(void) {
       continue;
     }
 
-    // Brief pause to ensure user has released Enter from selection menu
-    // before we grab the keyboard, preventing stuck key states
-    sleep(1);
-
     if (ioctl(kbd_fd, EVIOCGRAB, 1) < 0) {
       snprintf(error, sizeof(error), "Keyboard Grab Fail (sudo?)");
       close(mouse_fd);
@@ -477,7 +517,7 @@ int main(void) {
       sleep(1);
       continue;
     }
-    set_raw_terminal_mode();
+
     struct pollfd fds[3];
     fds[0].fd = mouse_fd;
     fds[0].events = POLLIN;
@@ -485,8 +525,6 @@ int main(void) {
     fds[1].events = POLLIN;
     fds[2].fd = STDIN_FILENO;
     fds[2].events = POLLIN;
-
-    print_ui();
 
     struct input_event ev;
     bool active = true;
@@ -544,28 +582,26 @@ int main(void) {
         }
 
         if (fds[2].revents & POLLIN) {
-          char c;
-          if (read(STDIN_FILENO, &c, 1) > 0) {
-            if (c == 'b') {
-              toggle_bhop = !toggle_bhop;
-              if (!toggle_bhop)
-                atomic_store(&action_bhop, false);
-              update_status_file();
-              print_ui();
-            } else if (c == 's') {
-              toggle_scroll = !toggle_scroll;
-              if (!toggle_scroll) {
-                atomic_store(&action_scroll_up, false);
-                atomic_store(&action_scroll_down, false);
-              }
-              update_status_file();
-              print_ui();
-            } else if (c == 'z') {
-              active = false;
-              reselect = true;
-            } else if (c == 'q' || c == 3) {
-              cleanup(0);
+          int c = getch();
+          if (c == 'b') {
+            toggle_bhop = !toggle_bhop;
+            if (!toggle_bhop)
+              atomic_store(&action_bhop, false);
+            update_status_file();
+            draw_main_ui();
+          } else if (c == 's') {
+            toggle_scroll = !toggle_scroll;
+            if (!toggle_scroll) {
+              atomic_store(&action_scroll_up, false);
+              atomic_store(&action_scroll_down, false);
             }
+            update_status_file();
+            draw_main_ui();
+          } else if (c == 'z') {
+            active = false;
+            reselect = true;
+          } else if (c == 'q' || c == 3) {
+            cleanup(0);
           }
         }
       }
@@ -573,7 +609,6 @@ int main(void) {
 
     release_all_keys(virt_fd);
 
-    reset_terminal_mode();
     if (mouse_fd >= 0) {
       ioctl(mouse_fd, EVIOCGRAB, 0);
       close(mouse_fd);
