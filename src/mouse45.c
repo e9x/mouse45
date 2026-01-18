@@ -172,6 +172,74 @@ void emit(int fd, uint16_t type, uint16_t code, int32_t value) {
   write(fd, &ie, sizeof(ie));
 }
 
+void wait_for_release(int fd, const char *device_name) {
+  if (fd < 0)
+    return;
+
+  uint8_t key_b[KEY_MAX / 8 + 1];
+  bool is_held = true;
+
+  while (is_held && atomic_load(&keep_running)) {
+    memset(key_b, 0, sizeof(key_b));
+
+    if (ioctl(fd, EVIOCGKEY(sizeof(key_b)), key_b) < 0) {
+      break;
+    }
+
+    is_held = false;
+    for (int i = 0; i < sizeof(key_b); i++) {
+      if (key_b[i] != 0) {
+        is_held = true;
+        break;
+      }
+    }
+
+    if (is_held) {
+      attron(COLOR_PAIR(CP_RED));
+      mvprintw(12, 1, "WAITING FOR RELEASE: Please let go of %s keys...",
+               device_name);
+      attroff(COLOR_PAIR(CP_RED));
+      refresh();
+      usleep(100000);
+    }
+  }
+
+  move(12, 0);
+  clrtoeol();
+  refresh();
+}
+
+void sync_device_state(int src_fd, int dst_fd) {
+  uint8_t key_bitmask[KEY_MAX / 8 + 1];
+  memset(key_bitmask, 0, sizeof(key_bitmask));
+
+  if (ioctl(src_fd, EVIOCGKEY(sizeof(key_bitmask)), key_bitmask) < 0) {
+    return;
+  }
+
+  pthread_mutex_lock(&uinput_lock);
+
+  int buttons[] = {BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA};
+  bool needed_sync = false;
+
+  for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); i++) {
+    int code = buttons[i];
+    int byte_idx = code / 8;
+    int bit_idx = code % 8;
+
+    if ((key_bitmask[byte_idx] >> bit_idx) & 1) {
+      emit(dst_fd, EV_KEY, code, 1);
+      needed_sync = true;
+    }
+  }
+
+  if (needed_sync) {
+    emit(dst_fd, EV_SYN, SYN_REPORT, 0);
+  }
+
+  pthread_mutex_unlock(&uinput_lock);
+}
+
 void release_all_keys(int fd) {
   if (fd < 0)
     return;
@@ -490,7 +558,7 @@ int main(void) {
       continue;
     }
 
-    sleep(1);
+    wait_for_release(mouse_fd, "Mouse");
 
     if (ioctl(mouse_fd, EVIOCGRAB, 1) < 0) {
       snprintf(error, sizeof(error), "Mouse Grab Fail (sudo?)");
@@ -509,6 +577,8 @@ int main(void) {
       continue;
     }
 
+    wait_for_release(kbd_fd, "Keyboard");
+
     if (ioctl(kbd_fd, EVIOCGRAB, 1) < 0) {
       snprintf(error, sizeof(error), "Keyboard Grab Fail (sudo?)");
       close(mouse_fd);
@@ -517,6 +587,8 @@ int main(void) {
       sleep(1);
       continue;
     }
+
+    sync_device_state(mouse_fd, virt_fd);
 
     struct pollfd fds[3];
     fds[0].fd = mouse_fd;
