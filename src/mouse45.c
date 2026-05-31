@@ -19,12 +19,11 @@
 
 #define SCROLL_DELAY_US 35000 // 35ms
 #define BHOP_DELAY_US 20000   // 20ms
+#define F_SPAM_DELAY_US 50000 // 50ms
 #define MAX_DEVICES 50
 #define MAX_PATH_LEN 256
 #define CONFIG_DIR "~/.config/mouse45"
-#define CONFIG_MOUSE CONFIG_DIR "/mouse.txt"
-#define CONFIG_KBD CONFIG_DIR "/keyboard.txt"
-#define CONFIG_STATUS CONFIG_DIR "/status.txt"
+#define CONFIG_FILE CONFIG_DIR "/config_v2.bin" 
 
 #define CP_NORMAL 1
 #define CP_GREEN 2
@@ -32,21 +31,31 @@
 #define CP_HEADER 4
 #define CP_HIGHLIGHT 5
 
+typedef struct {
+  bool bhop_enabled;
+  bool scroll_enabled;
+  bool f_spam_enabled; 
+  char mouse_path[MAX_PATH_LEN];
+  char kbd_path[MAX_PATH_LEN];
+} AppSettings;
+
+AppSettings settings = {.bhop_enabled = true,
+                        .scroll_enabled = true,
+                        .f_spam_enabled = false,
+                        .mouse_path = {0},
+                        .kbd_path = {0}};
+
 int mouse_fd = -1;
 int kbd_fd = -1;
 int virt_fd = -1;
 atomic_bool keep_running = true;
 
-pthread_mutex_t uinput_lock = PTHREAD_MUTEX_INITIALIZER;
-
-bool toggle_scroll = true;
-bool toggle_bhop = true;
-
 atomic_bool action_scroll_up = false;
 atomic_bool action_scroll_down = false;
 atomic_bool action_bhop = false;
+atomic_bool action_f_spam = false; 
 
-void cleanup_ncurses() { endwin(); }
+pthread_mutex_t uinput_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void init_ncurses_ui() {
   initscr();
@@ -87,70 +96,85 @@ void ensure_config_dir_exists() {
   mkdir(dir_path, 0755);
 }
 
-void update_status_file() {
+void save_settings() {
   ensure_config_dir_exists();
   char full_path[MAX_PATH_LEN];
-  get_expanded_path(CONFIG_STATUS, full_path);
-  FILE *f = fopen(full_path, "w");
-  if (f) {
-    fprintf(f, "Bhop: %s\nScroll: %s\n", toggle_bhop ? "ON" : "OFF",
-            toggle_scroll ? "ON" : "OFF");
-    fclose(f);
-  }
-}
+  get_expanded_path(CONFIG_FILE, full_path);
 
-void load_status() {
-  char full_path[MAX_PATH_LEN];
-  get_expanded_path(CONFIG_STATUS, full_path);
-  FILE *f = fopen(full_path, "r");
+  FILE *f = fopen(full_path, "wb");
   if (!f)
     return;
 
-  char line[128];
-  while (fgets(line, sizeof(line), f)) {
-    if (strstr(line, "Bhop:")) {
-      if (strstr(line, "OFF"))
-        toggle_bhop = false;
-      else if (strstr(line, "ON"))
-        toggle_bhop = true;
-    }
-    if (strstr(line, "Scroll:")) {
-      if (strstr(line, "OFF"))
-        toggle_scroll = false;
-      else if (strstr(line, "ON"))
-        toggle_scroll = true;
-    }
+  fwrite(&settings.bhop_enabled, sizeof(bool), 1, f);
+  fwrite(&settings.scroll_enabled, sizeof(bool), 1, f);
+  fwrite(&settings.f_spam_enabled, sizeof(bool), 1, f);
+
+  size_t m_len = strlen(settings.mouse_path);
+  fwrite(&m_len, sizeof(size_t), 1, f);
+  if (m_len > 0) {
+    fwrite(settings.mouse_path, 1, m_len, f);
   }
+
+  size_t k_len = strlen(settings.kbd_path);
+  fwrite(&k_len, sizeof(size_t), 1, f);
+  if (k_len > 0) {
+    fwrite(settings.kbd_path, 1, k_len, f);
+  }
+
   fclose(f);
 }
 
-void save_pref(const char *config_file, const char *device_path) {
-  ensure_config_dir_exists();
+bool load_settings() {
   char full_path[MAX_PATH_LEN];
-  get_expanded_path(config_file, full_path);
-  FILE *f = fopen(full_path, "w");
-  if (f) {
-    fprintf(f, "%s", device_path);
-    fclose(f);
-  }
-}
+  get_expanded_path(CONFIG_FILE, full_path);
 
-int load_pref(const char *config_file, char *device_path, size_t len) {
-  char full_path[MAX_PATH_LEN];
-  get_expanded_path(config_file, full_path);
-  FILE *f = fopen(full_path, "r");
-  if (f) {
-    if (fgets(device_path, len, f) != NULL) {
-      device_path[strcspn(device_path, "\n")] = 0;
-      fclose(f);
-      if (access(device_path, F_OK) == 0) {
-        return 0;
-      }
-    } else {
-      fclose(f);
-    }
+  FILE *f = fopen(full_path, "rb");
+  if (!f)
+    return false;
+
+  if (fread(&settings.bhop_enabled, sizeof(bool), 1, f) != 1) {
+    fclose(f);
+    return false;
   }
-  return -1;
+
+  if (fread(&settings.scroll_enabled, sizeof(bool), 1, f) != 1) {
+    fclose(f);
+    return false;
+  }
+
+  if (fread(&settings.f_spam_enabled, sizeof(bool), 1, f) != 1) {
+    fclose(f);
+    return false;
+  }
+
+  size_t m_len = 0;
+  if (fread(&m_len, sizeof(size_t), 1, f) == 1) {
+    if (m_len >= MAX_PATH_LEN)
+      m_len = MAX_PATH_LEN - 1;
+    if (m_len > 0) {
+      fread(settings.mouse_path, 1, m_len, f);
+    }
+    settings.mouse_path[m_len] = '\0';
+  }
+
+  size_t k_len = 0;
+  if (fread(&k_len, sizeof(size_t), 1, f) == 1) {
+    if (k_len >= MAX_PATH_LEN)
+      k_len = MAX_PATH_LEN - 1;
+    if (k_len > 0) {
+      fread(settings.kbd_path, 1, k_len, f);
+    }
+    settings.kbd_path[k_len] = '\0';
+  }
+
+  fclose(f);
+
+  if (access(settings.mouse_path, F_OK) != 0 ||
+      access(settings.kbd_path, F_OK) != 0) {
+    return false;
+  }
+
+  return true;
 }
 
 int ends_with(const char *str, const char *suffix) {
@@ -196,7 +220,7 @@ void wait_for_release(int fd, const char *device_name) {
 
     if (is_held) {
       attron(COLOR_PAIR(CP_RED));
-      mvprintw(12, 1, "WAITING FOR RELEASE: Please let go of %s keys...",
+      mvprintw(13, 1, "WAITING FOR RELEASE: Please let go of %s keys...",
                device_name);
       attroff(COLOR_PAIR(CP_RED));
       refresh();
@@ -204,7 +228,7 @@ void wait_for_release(int fd, const char *device_name) {
     }
   }
 
-  move(12, 0);
+  move(13, 0);
   clrtoeol();
   refresh();
 }
@@ -268,7 +292,7 @@ void draw_main_ui() {
   mvprintw(1, 0, "---------------------------------------------------------");
 
   mvprintw(3, 1, "[s] Scrolling  : ");
-  if (toggle_scroll) {
+  if (settings.scroll_enabled) {
     attron(COLOR_PAIR(CP_GREEN));
     printw("ON ");
     attroff(COLOR_PAIR(CP_GREEN));
@@ -281,7 +305,7 @@ void draw_main_ui() {
   printw(" (Side buttons)");
 
   mvprintw(4, 1, "[b] Bhop       : ");
-  if (toggle_bhop) {
+  if (settings.bhop_enabled) {
     attron(COLOR_PAIR(CP_GREEN));
     printw("ON ");
     attroff(COLOR_PAIR(CP_GREEN));
@@ -293,11 +317,24 @@ void draw_main_ui() {
   attron(COLOR_PAIR(CP_NORMAL));
   printw(" (Hold `)");
 
-  mvprintw(6, 0, "---------------------------------------------------------");
-  mvprintw(7, 1, "BackBtn        : Scroll Down | Ctrl + BackBtn : Back");
-  mvprintw(8, 1, "FwdBtn         : Scroll Up   | Ctrl + FwdBtn  : Forward");
-  mvprintw(9, 0, "---------------------------------------------------------");
-  mvprintw(11, 1, "[z] Reselect Devices | [q] Quit");
+  mvprintw(5, 1, "[f] F Spam     : ");
+  if (settings.f_spam_enabled) {
+    attron(COLOR_PAIR(CP_GREEN));
+    printw("ON ");
+    attroff(COLOR_PAIR(CP_GREEN));
+  } else {
+    attron(COLOR_PAIR(CP_RED));
+    printw("OFF");
+    attroff(COLOR_PAIR(CP_RED));
+  }
+  attron(COLOR_PAIR(CP_NORMAL));
+  printw(" (Hold J)");
+
+  mvprintw(7, 0, "---------------------------------------------------------");
+  mvprintw(8, 1, "BackBtn        : Scroll Down | Ctrl + BackBtn : Back");
+  mvprintw(9, 1, "FwdBtn         : Scroll Up   | Ctrl + FwdBtn  : Forward");
+  mvprintw(10, 0, "---------------------------------------------------------");
+  mvprintw(12, 1, "[z] Reselect Devices | [q] Quit");
 
   attroff(COLOR_PAIR(CP_NORMAL));
   refresh();
@@ -413,12 +450,15 @@ int select_device(char *selected_path, size_t len, const char *error_msg,
 void *output_thread(void *arg) {
   int sc_timer = 0;
   int bh_timer = 0;
+  int f_timer = 0;
+  
   while (atomic_load(&keep_running)) {
     bool up = atomic_load(&action_scroll_up);
     bool down = atomic_load(&action_scroll_down);
     bool hop = atomic_load(&action_bhop);
+    bool f_spam = atomic_load(&action_f_spam);
 
-    if (!up && !down && !hop) {
+    if (!up && !down && !hop && !f_spam) {
       usleep(10000);
       continue;
     }
@@ -448,6 +488,22 @@ void *output_thread(void *arg) {
       bh_timer -= 5000;
     }
 
+    if (f_spam) {
+      if (f_timer <= 0) {
+        //emit(virt_fd, EV_KEY, 33 /* KEY_F */, 1);
+        emit(virt_fd, EV_KEY, 18 /* KEY_E */, 1);
+	emit(virt_fd, EV_SYN, SYN_REPORT, 0);
+        pthread_mutex_unlock(&uinput_lock);
+        usleep(2000);
+        pthread_mutex_lock(&uinput_lock);
+        //emit(virt_fd, EV_KEY, 33 /* KEY_F */, 0);
+        emit(virt_fd, EV_KEY, 18 /* KEY_E */, 0);
+	emit(virt_fd, EV_SYN, SYN_REPORT, 0);
+        f_timer = F_SPAM_DELAY_US;
+      }
+      f_timer -= 5000;
+    }
+
     pthread_mutex_unlock(&uinput_lock);
     usleep(5000);
   }
@@ -472,7 +528,7 @@ void cleanup(int signo) {
     close(kbd_fd);
   }
 
-  cleanup_ncurses();
+  endwin();
   printf("byeee\n");
   exit(0);
 }
@@ -482,12 +538,15 @@ int main(void) {
 
   signal(SIGINT, cleanup);
   signal(SIGTERM, cleanup);
-  load_status();
-  update_status_file();
+
+  bool loaded = load_settings();
+  
+  // Keep action set to false at startup so it only spams when physically held
+  atomic_store(&action_f_spam, false);
 
   virt_fd = open("/dev/uinput", O_WRONLY);
   if (virt_fd < 0) {
-    cleanup_ncurses();
+    endwin();
     perror("Failed to open /dev/uinput");
     return 1;
   }
@@ -517,31 +576,28 @@ int main(void) {
   pthread_t t;
   pthread_create(&t, NULL, output_thread, NULL);
 
-  char m_path[MAX_PATH_LEN] = {0}, k_path[MAX_PATH_LEN] = {0};
   char error[256] = {0};
-  bool reselect = false;
+  bool reselect = !loaded;
 
   while (atomic_load(&keep_running)) {
-    if (reselect || load_pref(CONFIG_MOUSE, m_path, sizeof(m_path)) != 0) {
-      if (select_device(m_path, sizeof(m_path), error, m_path, "event-mouse",
-                        "Mouse") != 0) {
-        if (access(m_path, F_OK) != 0)
+    if (reselect || strlen(settings.mouse_path) == 0) {
+      if (select_device(settings.mouse_path, sizeof(settings.mouse_path), error,
+                        settings.mouse_path, "event-mouse", "Mouse") != 0) {
+        if (access(settings.mouse_path, F_OK) != 0)
           cleanup(0);
-        reselect = false;
       } else {
-        save_pref(CONFIG_MOUSE, m_path);
+        save_settings();
       }
       error[0] = 0;
     }
 
-    if (reselect || load_pref(CONFIG_KBD, k_path, sizeof(k_path)) != 0) {
-      if (select_device(k_path, sizeof(k_path), error, k_path, "event-kbd",
-                        "Keyboard") != 0) {
-        if (access(k_path, F_OK) != 0)
+    if (reselect || strlen(settings.kbd_path) == 0) {
+      if (select_device(settings.kbd_path, sizeof(settings.kbd_path), error,
+                        settings.kbd_path, "event-kbd", "Keyboard") != 0) {
+        if (access(settings.kbd_path, F_OK) != 0)
           cleanup(0);
-        reselect = false;
       } else {
-        save_pref(CONFIG_KBD, k_path);
+        save_settings();
       }
       error[0] = 0;
     }
@@ -550,7 +606,7 @@ int main(void) {
 
     draw_main_ui();
 
-    mouse_fd = open(m_path, O_RDONLY);
+    mouse_fd = open(settings.mouse_path, O_RDONLY);
     if (mouse_fd < 0) {
       snprintf(error, sizeof(error), "Mouse Open Fail: %s", strerror(errno));
       reselect = true;
@@ -568,7 +624,7 @@ int main(void) {
       continue;
     }
 
-    kbd_fd = open(k_path, O_RDONLY);
+    kbd_fd = open(settings.kbd_path, O_RDONLY);
     if (kbd_fd < 0) {
       snprintf(error, sizeof(error), "Keyboard Open Fail: %s", strerror(errno));
       close(mouse_fd);
@@ -607,7 +663,7 @@ int main(void) {
         if (fds[0].revents & POLLIN) {
           if (read(mouse_fd, &ev, sizeof(ev)) > 0) {
             bool hooked = false;
-            if (ev.type == EV_KEY && toggle_scroll && !is_ctrl_held) {
+            if (ev.type == EV_KEY && settings.scroll_enabled && !is_ctrl_held) {
               if (ev.code == BTN_EXTRA) {
                 atomic_store(&action_scroll_up, ev.value != 0);
                 hooked = true;
@@ -637,8 +693,16 @@ int main(void) {
               }
             }
 
-            if (ev.type == EV_KEY && ev.code == KEY_GRAVE && toggle_bhop) {
+            if (ev.type == EV_KEY && ev.code == KEY_GRAVE &&
+                settings.bhop_enabled) {
               atomic_store(&action_bhop, ev.value != 0);
+              hooked = true;
+            }
+
+            // Hook for the J key spammer
+            if (ev.type == EV_KEY && ev.code == 36 /* KEY_J */ &&
+                settings.f_spam_enabled) {
+              atomic_store(&action_f_spam, ev.value != 0);
               hooked = true;
             }
 
@@ -656,18 +720,25 @@ int main(void) {
         if (fds[2].revents & POLLIN) {
           int c = getch();
           if (c == 'b') {
-            toggle_bhop = !toggle_bhop;
-            if (!toggle_bhop)
+            settings.bhop_enabled = !settings.bhop_enabled;
+            if (!settings.bhop_enabled)
               atomic_store(&action_bhop, false);
-            update_status_file();
+            save_settings();
             draw_main_ui();
           } else if (c == 's') {
-            toggle_scroll = !toggle_scroll;
-            if (!toggle_scroll) {
+            settings.scroll_enabled = !settings.scroll_enabled;
+            if (!settings.scroll_enabled) {
               atomic_store(&action_scroll_up, false);
               atomic_store(&action_scroll_down, false);
             }
-            update_status_file();
+            save_settings();
+            draw_main_ui();
+          } else if (c == 'f' || c == 'F') { // UI toggle changed to 'f'
+            settings.f_spam_enabled = !settings.f_spam_enabled;
+            if (!settings.f_spam_enabled) {
+              atomic_store(&action_f_spam, false);
+            }
+            save_settings();
             draw_main_ui();
           } else if (c == 'z') {
             active = false;
